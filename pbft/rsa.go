@@ -6,48 +6,36 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
+
+const (
+	keystore = "/Users/dylen/workspace/gohome/src/github.com/dylenfu/consensus_examples/build/keystore"
+)
+
+func priKeyFormat(i int) string { return fmt.Sprintf("%s/N%d_RSA_PIV", keystore, i) }
+func pubKeyFormat(i int) string { return fmt.Sprintf("%s/N%d_RSA_PUB", keystore, i) }
 
 //如果当前目录下不存在目录Keys，则创建目录，并为各个节点生成rsa公私钥
 func genRsaKeys() {
-	if !isExist("./Keys") {
-		fmt.Println("检测到还未生成公私钥目录，正在生成公私钥 ...")
-		err := os.Mkdir("Keys", 0644)
-		if err != nil {
-			log.Panic()
+	for i := 0; i <= 4; i++ {
+		if err := os.MkdirAll(keystore, os.ModePerm); err != nil {
+			return
 		}
-		for i := 0; i <= 4; i++ {
-			if !isExist("./Keys/N" + strconv.Itoa(i)) {
-				err := os.Mkdir("./Keys/N"+strconv.Itoa(i), 0644)
-				if err != nil {
-					log.Panic()
-				}
-			}
-			priv, pub := getKeyPair()
-			privFileName := "Keys/N" + strconv.Itoa(i) + "/N" + strconv.Itoa(i) + "_RSA_PIV"
-			file, err := os.OpenFile(privFileName, os.O_RDWR|os.O_CREATE, 0644)
-			if err != nil {
-				log.Panic(err)
-			}
-			defer file.Close()
-			file.Write(priv)
 
-			pubFileName := "Keys/N" + strconv.Itoa(i) + "/N" + strconv.Itoa(i) + "_RSA_PUB"
-			file2, err := os.OpenFile(pubFileName, os.O_RDWR|os.O_CREATE, 0644)
-			if err != nil {
-				log.Panic(err)
-			}
-			defer file2.Close()
-			file2.Write(pub)
-		}
-		fmt.Println("已为节点们生成RSA公私钥")
+		priv, pub := getKeyPair()
+		writeFile(priKeyFormat(i), priv)
+		writeFile(pubKeyFormat(i), pub)
 	}
+	fmt.Println("已为节点们生成RSA公私钥")
 }
 
 //生成rsa公私钥
@@ -76,24 +64,32 @@ func getKeyPair() (prvkey, pubkey []byte) {
 	return
 }
 
-//判断文件或文件夹是否存在
-func isExist(path string) bool {
-	_, err := os.Stat(path)
+//传入节点编号， 获取对应的公钥
+func getPubKey(node string) []byte {
+	idx, _ := strconv.Atoi(strings.TrimLeft(node, "N"))
+	fn := pubKeyFormat(idx)
+	key, err := ioutil.ReadFile(fn)
 	if err != nil {
-		if os.IsExist(err) {
-			return true
-		}
-		if os.IsNotExist(err) {
-			return false
-		}
-		fmt.Println(err)
-		return false
+		log.Panic(err)
 	}
-	return true
+	return key
+}
+
+//传入节点编号， 获取对应的私钥
+func getPivKey(node string) []byte {
+	idx, _ := strconv.Atoi(strings.TrimLeft(node, "N"))
+	fn := priKeyFormat(idx)
+	key, err := ioutil.ReadFile(fn)
+	if err != nil {
+		log.Panic(err)
+	}
+	return key
 }
 
 //数字签名
-func (p *pbft) RsaSignWithSha256(data []byte, keyBytes []byte) []byte {
+func Sign(digest string, node string) []byte {
+	keyBytes := getPivKey(node)
+	data, _ := hex.DecodeString(digest)
 	h := sha256.New()
 	h.Write(data)
 	hashed := h.Sum(nil)
@@ -117,20 +113,30 @@ func (p *pbft) RsaSignWithSha256(data []byte, keyBytes []byte) []byte {
 }
 
 //签名验证
-func (p *pbft) RsaVerySignWithSha256(data, signData, keyBytes []byte) bool {
+func Verify(digest string, signData []byte, node string) error {
+	keyBytes := getPubKey(node)
+	data, _ := hex.DecodeString(digest)
 	block, _ := pem.Decode(keyBytes)
 	if block == nil {
-		panic(errors.New("public key error"))
+		return fmt.Errorf("public key error")
 	}
 	pubKey, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	hashed := sha256.Sum256(data)
-	err = rsa.VerifyPKCS1v15(pubKey.(*rsa.PublicKey), crypto.SHA256, hashed[:], signData)
-	if err != nil {
-		panic(err)
+	if err := rsa.VerifyPKCS1v15(pubKey.(*rsa.PublicKey), crypto.SHA256, hashed[:], signData); err != nil {
+		return err
 	}
-	return true
+	return nil
+}
+
+func writeFile(fn string, content []byte) {
+	file, err := os.OpenFile(fn, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		log.Panic(err)
+	}
+	defer file.Close()
+	file.Write(content)
 }

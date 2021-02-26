@@ -24,6 +24,7 @@ func clientSendMessageAndListen() {
 	//首先通过命令行获取用户输入
 	stdReader := bufio.NewReader(os.Stdin)
 	for {
+		logsplit()
 		data, err := stdReader.ReadString('\n')
 		if err != nil {
 			fmt.Println("Error reading from stdin")
@@ -58,4 +59,10 @@ func getRandom() int {
 			return int(result.Int64())
 		}
 	}
+}
+
+func logsplit() {
+	fmt.Println("")
+	fmt.Println("")
+	fmt.Println("============================================================================")
 }
